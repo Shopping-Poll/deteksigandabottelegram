@@ -1,0 +1,11 @@
+.env
+*.db
+*.log
+__pycache__/
+*.pyc
+.vscode/
+node_modules/
+pm2.config.js
+telegram-bot.service
+docker-compose.yml
+Dockerfile
