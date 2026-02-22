@@ -14,9 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create volume for database (Railway will mount this)
+# Create directory for data (Railway will mount a volume here)
 RUN mkdir -p /app/data && chown -R bot:bot /app/data
-VOLUME /app/data
 
 # Create non-root user
 RUN groupadd -r bot && useradd -r -g bot bot
