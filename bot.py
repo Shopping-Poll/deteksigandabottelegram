@@ -17,6 +17,9 @@ try:
 except AttributeError:
     pass
 
+# Set timezone untuk logging
+logging.Formatter.converter = lambda *args: datetime.now(pytz.timezone('Asia/Jakarta')).timetuple()
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -36,13 +39,16 @@ class ProductionDuplicateBot:
         if not self.token:
             raise ValueError("❌ BOT_TOKEN environment variable not set")
             
+        # Set zona waktu Jakarta
+        self.timezone = pytz.timezone('Asia/Jakarta')
+            
         self.app = Application.builder().token(self.token).build()
         self.setup_database()
         self.setup_handlers()
         self.setup_error_handler()
         self.setup_signal_handlers()
         
-        logger.info("🤖 Bot initialized successfully")
+        logger.info("🤖 Bot initialized successfully with Jakarta timezone")
         
     def setup_database(self):
         """Setup database dengan path yang lebih baik"""
@@ -102,6 +108,29 @@ class ProductionDuplicateBot:
         normalized_text = ' '.join(text.lower().split())
         return hashlib.md5(normalized_text.encode()).hexdigest()
         
+    def get_current_time(self):
+        """Mendapatkan waktu saat ini dalam zona waktu Jakarta"""
+        return datetime.now(self.timezone)
+    
+    def format_time_for_db(self, dt=None):
+        """Format waktu untuk penyimpanan di database"""
+        if dt is None:
+            dt = self.get_current_time()
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    def format_time_display(self, dt_str):
+        """Format waktu untuk ditampilkan ke user"""
+        try:
+            # Parse waktu dari database
+            dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+            # Pastikan waktu memiliki timezone Jakarta
+            if dt.tzinfo is None:
+                dt = self.timezone.localize(dt)
+            return dt.strftime('%Y/%m/%d %H:%M:%S')
+        except Exception as e:
+            logger.error(f"Error formatting time: {e}")
+            return dt_str
+        
     async def handle_message(self, update: Update, context):
         """Handle incoming messages"""
         try:
@@ -135,29 +164,22 @@ class ProductionDuplicateBot:
             if existing_message:
                 original_user_id, original_text, original_time, original_user_name = existing_message
                 
-                # Lakukan pengecekan duplikat meskipun pengirimnya adalah orang yang sama
-                # Format Waktu: 2026/02/22 10:21:23
-                tz_jakarta = pytz.timezone('Asia/Jakarta')
-                
-                original_time_dt = datetime.strptime(original_time, '%Y-%m-%d %H:%M:%S')
-                # Asumsikan DB menyimpan waktu lokal asli, jadi kita langsung format biasa
-                original_time_str = original_time_dt.strftime('%Y/%m/%d %H:%M:%S')
-                
-                current_time_str = datetime.now(tz_jakarta).strftime('%Y/%m/%d %H:%M:%S')
+                # Format waktu untuk ditampilkan
+                original_time_str = self.format_time_display(original_time)
+                current_time_str = self.format_time_display(self.format_time_for_db())
                 
                 response_message = (
-                    f"❌Nomor sudah pernah bergabung❌\n"
-                    f"Nomor yang terdeteksi: {original_text}\n"
+                    f"❌DETEKSI SISTEM❌\n"
+                    f"TEXT: {original_text}\n"
                     f"{original_user_name} : {original_time_str} (pertama kali)\n"
                     f"{user_name} : {current_time_str} (kali ini)"
                 )
                 
                 msg = await message.reply_text(response_message)
-                logger.info(f"🚫 Duplicate detected in chat {chat_id}")
+                logger.info(f"🚫 Duplicate detected in chat {chat_id} at {current_time_str} WIB")
             else:
-                # Simpan pesan baru ke database menggunakan waktu Jakarta saat ini
-                tz_jakarta = pytz.timezone('Asia/Jakarta')
-                current_time = datetime.now(tz_jakarta).strftime('%Y-%m-%d %H:%M:%S')
+                # Simpan pesan baru ke database dengan waktu Jakarta
+                current_time = self.format_time_for_db()
                 
                 cursor.execute('''
                     INSERT OR REPLACE INTO messages 
@@ -165,6 +187,8 @@ class ProductionDuplicateBot:
                     VALUES (?, ?, ?, ?, ?, ?)
                 ''', (chat_id, message_hash, message_text, user_id, current_time, user_name))
                 self.conn.commit()
+                
+                logger.info(f"✅ New message saved at {current_time} WIB")
                 
             # Bersihkan pesan yang lebih dari 7 hari
             cursor.execute('DELETE FROM messages WHERE timestamp < datetime("now", "-7 days")')
@@ -175,7 +199,8 @@ class ProductionDuplicateBot:
         
     def run_polling(self):
         """Jalankan dengan polling (untuk development)"""
-        logger.info("🔄 Starting bot with polling...")
+        current_time = self.format_time_display(self.format_time_for_db())
+        logger.info(f"🔄 Starting bot with polling at {current_time} WIB...")
         self.app.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES
@@ -190,7 +215,8 @@ class ProductionDuplicateBot:
             logger.warning("⚠️ WEBHOOK_URL not set, falling back to polling")
             return self.run_polling()
             
-        logger.info(f"🌐 Starting bot with webhook: {webhook_url}")
+        current_time = self.format_time_display(self.format_time_for_db())
+        logger.info(f"🌐 Starting bot with webhook: {webhook_url} at {current_time} WIB")
         self.app.run_webhook(
             listen="0.0.0.0",
             port=port,
